@@ -1084,6 +1084,7 @@ function routingPage(part) {
   let wanted = document.body.classList.contains("window") && Number(params.get("req")) || 0;
   let cur = null;           // the route the header and the log tell of: the newest played
   let pinned = null;        // a past route picked from the strip
+  let returnView = null;    // Routing's day, request and filter before a link opened another route
   let rows = new Map();     // id → { li, wire, st, bi, tg, w, rid, up }
   const subs = new Map();   // a group in the group's way down → its heading { li, wire, key, up }
   // A provider's keys serving one model, FOLD_AT or more of them side by
@@ -1895,7 +1896,7 @@ function routingPage(part) {
     log.hidden = !r;
     if (!r) return;
     const on = () => listed().filter((x) => x.id >= logR.id);
-    const head = JSON.stringify([document.documentElement.lang, !!rp, pinned?.id, r.id, r.time, r.done, !!pinned && on().length > 1, bodiesFor === r.id, r.masked?.key, r.masked?.n]);
+    const head = JSON.stringify([document.documentElement.lang, !!rp, pinned?.id, r.id, r.time, r.done, !!returnView, !!pinned && on().length > 1, bodiesFor === r.id, r.masked?.key, r.masked?.n]);
     if (headKey !== head) {
       headKey = head;
       logHead.replaceChildren(
@@ -1922,6 +1923,16 @@ function routingPage(part) {
           from.onclick = () => replay(on(), pinned);
           logHead.append(from);
         }
+      }
+      if (returnView && !rp) {
+        const previous = el("button", "text", t("Back to previous routing view"));
+        previous.onclick = () => {
+          const saved = returnView;
+          if (!saved) return;
+          previous.disabled = true;
+          returnToRouteView(saved).catch((err) => status(err.message, "err"));
+        };
+        logHead.append(previous);
       }
       if (pinned && !rp) {
         const live = el("button", "text", t("Back to live"));
@@ -2184,9 +2195,30 @@ function routingPage(part) {
     say(affWhy(r, true) || ruleWhy(r, true) || firstWhy(r));
   }
 
+  function routeViewState() {
+    return {
+      day,
+      pinned: pinned?.id || 0,
+      purpose: [...purpose],
+    };
+  }
+
+  async function returnToRouteView(saved) {
+    returnView = null;
+    purpose = saved.purpose;
+    day = saved.day;
+    past = [];
+    if (day) await loadDays(day);
+    pinned = null;
+    const wanted = saved.pinned && (day ? past : [...routes.values()]).find((r) => r.id === saved.pinned);
+    if (wanted) pick(wanted);
+    else followListed();
+  }
+
   // o.context: opened to see its context window (the Usage page's
   // Context tab), which shows unfolded for it
   window.openRoute = async (id, time, o = {}) => {
+    const fromAnotherPage = !shown();
     let r = routes.get(id);
     if (!r) {
       const res = await fetch("/api/gateway/route?id=" + encodeURIComponent(id) + "&day=" + encodeURIComponent(time.slice(0, 10)));
@@ -2195,6 +2227,7 @@ function routingPage(part) {
       r = whole(await res.json());
       noteAccounts(r);
     }
+    if (fromAnotherPage && !returnView) returnView = routeViewState();
     day = routes.has(id) ? "" : r.time.slice(0, 10);
     if (day) {
       await loadDays(day);
